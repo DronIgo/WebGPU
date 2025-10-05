@@ -76,29 +76,26 @@ const init = async () => {
     // ~~ SETUP VERTICES (position (vec3<f32>), color(vec3<f32>)) ~~
     // Pack them all into one array
     // Each vertex has a position and a color packed in memory in X Y Z R G B order
-    const cell_width = 4;
-    const cell_height = 4;
-    const cell_side_size = 1.0;
-    const color = [1.0, 0.0, 0.5];
+    const cellWidth = 16;
+    const cellHeight = 16;
+    const squareSideSize = 4.0;
+    const cellSideSizeX = squareSideSize / cellWidth;
+    const cellSideSizeY = squareSideSize / cellHeight;
     //num of floats per vertex (XYZRGB) * num of vertex per cell * num of cells
-    let vertices = new Float32Array(8 * 6 * cell_width * cell_height);
+    let vertices = new Float32Array(4 * 6 * cellWidth * cellHeight);
     let offset = 0;
     const addVertex = (x,z) => {
         vertices[offset++] = x;
         vertices[offset++] = 0.0;
         vertices[offset++] = z;
         vertices[offset++] = 1.0;
-        vertices[offset++] = color[0];
-        vertices[offset++] = color[1];
-        vertices[offset++] = color[2];
-        vertices[offset++] = 1.0;
     };
-    for (let w = 0; w < cell_width; w++) {
-        for (let h = 0; h < cell_height; h++) {
-            const l_x = (w - cell_width/2) * cell_side_size;
-            const r_x = (w + 1 - cell_width/2) * cell_side_size;
-            const n_z = (h - cell_height/2) * cell_side_size;
-            const f_z = (h + 1 - cell_height/2) * cell_side_size;
+    for (let w = 0; w < cellWidth; w++) {
+        for (let h = 0; h < cellHeight; h++) {
+            const l_x = (w - cellWidth/2) * cellSideSizeX;
+            const r_x = (w + 1 - cellWidth/2) * cellSideSizeX;
+            const n_z = (h - cellHeight/2) * cellSideSizeY;
+            const f_z = (h + 1 - cellHeight/2) * cellSideSizeY;
             //bottom triangle
             addVertex(l_x, n_z);
             addVertex(r_x, n_z);
@@ -133,14 +130,9 @@ const init = async () => {
             shaderLocation: 0,
             offset: 0,
             format: "float32x4",
-            },
-            {
-            shaderLocation: 1,
-            offset: 16,
-            format: "float32x4",
-            },
+            }
         ],
-        arrayStride: 32,
+        arrayStride: 16,
         stepMode: "vertex",
         },
     ];
@@ -183,30 +175,31 @@ const init = async () => {
 
     // ~~ DEFINE BASIC SHADERS ~~
     //TO DO: find a way to load from a separate file
-    const displayCode = `
+    const displayCode = /* wgsl */`
     struct VertexOut {
         @builtin(position) position : vec4<f32>,
-        @location(0) color : vec4<f32>,
+        @location(0) color : vec3<f32>,
     };
 
     @group(0) @binding(0) var<uniform> mvp : mat4x4<f32>;
 
     @vertex
     fn vertex_main(
-        @location(0) position: vec4<f32>,
-        @location(1) color: vec3<f32>
+        @builtin(vertex_index) vertexIndex : u32,
+        @location(0) position: vec4<f32>
     ) -> VertexOut
     {
         var output : VertexOut;
         output.position = mvp * position;
-        output.color = vec4(color, 1.0);
+        output.color = vec3(f32(vertexIndex % 3 != 0), f32(vertexIndex % 3 != 1), f32(vertexIndex % 3 != 2));
         return output;
     } 
 
     @fragment
     fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32>
     {
-        return fragData.color;
+        var maxColor = max(fragData.color.x, max(fragData.color.y, fragData.color.z));
+        return select(vec4(0.8, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), maxColor > 0.98);
     } `;
 
     const shaderModule = device.createShaderModule({
@@ -300,7 +293,7 @@ const init = async () => {
         passEncoder.setPipeline(pipeline);
         passEncoder.setVertexBuffer(0, vertexBuffer);
         passEncoder.setBindGroup(0, bindGroup);
-        passEncoder.draw(cell_width * cell_height * 2 * 3);
+        passEncoder.draw(cellWidth * cellHeight * 2 * 3);
         passEncoder.end();
 
         device.queue.submit([commandEncoder.finish()]);
