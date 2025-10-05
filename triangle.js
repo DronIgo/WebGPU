@@ -80,9 +80,9 @@ const init = async () => {
     const cellHeight = 16;
     const squareSideSize = 4.0;
     const cellSideSizeX = squareSideSize / cellWidth;
-    const cellSideSizeY = squareSideSize / cellHeight;
-    //num of floats per vertex (XYZRGB) * num of vertex per cell * num of cells
-    let vertices = new Float32Array(4 * 6 * cellWidth * cellHeight);
+    const cellSideSizeZ = squareSideSize / cellHeight;
+    //num of floats per vertex (XYZW) * num of vertices per row * num of vertices per column
+    let vertices = new Float32Array(4 * (cellWidth + 1) * (cellHeight + 1));
     let offset = 0;
     const addVertex = (x,z) => {
         vertices[offset++] = x;
@@ -90,32 +90,15 @@ const init = async () => {
         vertices[offset++] = z;
         vertices[offset++] = 1.0;
     };
-    for (let w = 0; w < cellWidth; w++) {
-        for (let h = 0; h < cellHeight; h++) {
-            const l_x = (w - cellWidth/2) * cellSideSizeX;
-            const r_x = (w + 1 - cellWidth/2) * cellSideSizeX;
-            const n_z = (h - cellHeight/2) * cellSideSizeY;
-            const f_z = (h + 1 - cellHeight/2) * cellSideSizeY;
-            //bottom triangle
-            addVertex(l_x, n_z);
-            addVertex(r_x, n_z);
-            addVertex(r_x, f_z);
-            //top triangle
-            addVertex(l_x, n_z);
-            addVertex(r_x, f_z);
-            addVertex(l_x, f_z);
-            console.debug("triangle");
-            console.debug(l_x, " ", n_z);
-            console.debug(r_x, " ", f_z);
-            console.debug(r_x, " ", n_z);
-
-            console.debug("triangle");
-            console.debug(l_x, " ", n_z);
-            console.debug(l_x, " ", f_z);
-            console.debug(r_x, " ", f_z);
+    for (let w = 0; w < cellWidth + 1; w++) {
+        for (let h = 0; h < cellHeight + 1; h++) {
+            const x = (w - cellWidth/2) * cellSideSizeX;
+            const z = (h - cellHeight/2) * cellSideSizeZ;
+            addVertex(x, z);
         }
     }
     const vertexBuffer = device.createBuffer({
+        label: "vertex buffer",
         size: vertices.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true,
@@ -137,6 +120,30 @@ const init = async () => {
         },
     ];
 
+    // ~~ SETUP INDICES ~~
+    let indices = new Int32Array(6 * cellWidth * cellHeight);
+    let offsetIdx = 0;
+    let col = cellHeight + 1;
+    for (let w = 0; w < cellWidth; ++w) {
+        for (let h = 0; h < cellHeight; ++h) {
+            indices[offsetIdx++] = w * col + h;
+            indices[offsetIdx++] = (w + 1) * col + h;
+            indices[offsetIdx++] = (w + 1) * col + h + 1;
+            indices[offsetIdx++] = w * col + h;
+            indices[offsetIdx++] = (w + 1) * col + h + 1;
+            indices[offsetIdx++] = w * col + h + 1;
+        }
+    }
+
+    let indexBuffer = device.createBuffer({
+        label: "index buffer",
+        size: indices.byteLength,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true
+    });
+    new Int32Array(indexBuffer.getMappedRange()).set(indices);
+    indexBuffer.unmap();
+
     // ~~ SETUP UNIFORM BUFFER ~~
     const objectPosition = [0, 0, 0];
     const cameraPosition = [0, 2, 4];
@@ -152,13 +159,14 @@ const init = async () => {
     const projectionMatrix = mat4.perspective(fovX, aspect, near, far);
 
     const mvpMatrix = mat4.multiply(projectionMatrix, mat4.multiply(viewMatrix, modelMatrix));
-
+    const column = new Uint32Array([cellHeight + 1]);
     const uniformBuffer = device.createBuffer({
-        size: mvpMatrix.byteLength,
+        size: mvpMatrix.byteLength + 16,// + column.byteLength doesn't work due to padding and alinment issues
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true,
     });
-    new Float32Array(uniformBuffer.getMappedRange()).set(mvpMatrix);
+    new Float32Array(uniformBuffer.getMappedRange(0, mvpMatrix.byteLength)).set(mvpMatrix);
+    new Uint32Array(uniformBuffer.getMappedRange(mvpMatrix.byteLength, column.byteLength)).set(column);
     uniformBuffer.unmap();
 
     const bindGroupLayout = device.createBindGroupLayout({
@@ -178,10 +186,15 @@ const init = async () => {
     const displayCode = /* wgsl */`
     struct VertexOut {
         @builtin(position) position : vec4<f32>,
-        @location(0) color : vec3<f32>,
+        @location(0) bar : vec2<f32>,
     };
 
-    @group(0) @binding(0) var<uniform> mvp : mat4x4<f32>;
+    struct Uniforms {
+        mvp : mat4x4<f32>,
+        col : u32,
+    }
+
+    @group(0) @binding(0) var<uniform> uni : Uniforms;
 
     @vertex
     fn vertex_main(
@@ -190,16 +203,30 @@ const init = async () => {
     ) -> VertexOut
     {
         var output : VertexOut;
-        output.position = mvp * position;
-        output.color = vec3(f32(vertexIndex % 3 != 0), f32(vertexIndex % 3 != 1), f32(vertexIndex % 3 != 2));
+        output.position = uni.mvp * position;
+        var xIndex = vertexIndex % uni.col;
+        var yIndex = vertexIndex / uni.col;
+        //analogue of baricentric coordinates for each cell values will look similiar to following:
+        //(0,1)--(1,1)
+        //  |      |
+        //(0,0)--(1,0)
+        //which will allow as to check whether pixel is close to the side of cell or not in the fragment shader
+        output.bar = vec2(f32(xIndex % 2), f32(yIndex % 2));
         return output;
     } 
 
+    //desired width of wireframe lines in pixels
+    const lineWidth : f32 = 1.0;
     @fragment
     fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32>
     {
-        var maxColor = max(fragData.color.x, max(fragData.color.y, fragData.color.z));
-        return select(vec4(0.8, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), maxColor > 0.98);
+        var bar = fragData.bar;
+        //essentialy speed of changing for each of the "baricentric" coordinates
+        var d = fwidth(fragData.bar);
+        var bar4 = vec4(bar, vec2(1.0) - bar);
+        var thold4 = vec4(d * lineWidth, d * lineWidth);
+        var onLine = any(vec4<bool>(bar4 < thold4));
+        return select(vec4(0.8, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), onLine);
     } `;
 
     const shaderModule = device.createShaderModule({
@@ -292,8 +319,9 @@ const init = async () => {
 
         passEncoder.setPipeline(pipeline);
         passEncoder.setVertexBuffer(0, vertexBuffer);
+        passEncoder.setIndexBuffer(indexBuffer, "uint32");
         passEncoder.setBindGroup(0, bindGroup);
-        passEncoder.draw(cellWidth * cellHeight * 2 * 3);
+        passEncoder.drawIndexed(cellHeight * cellWidth * 6);
         passEncoder.end();
 
         device.queue.submit([commandEncoder.finish()]);
