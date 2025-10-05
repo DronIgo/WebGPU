@@ -1,16 +1,6 @@
-import { mat4, vec3 } from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.js';
+'use strict'
 
-const readFile = (filename) => {
-    const reader = new FileReader();
-    let text;
-    reader.onload = () => {
-        text = reader.result;
-    };
-    reader.onerror = () => {
-        console.error("failed to read file ", filename)
-    };
-    reader.readAsText(filename)
-}
+import { mat4, vec3 } from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.js';
 
 const init = async () => {
     // ~~ INITIALIZE ~~ Make sure we can initialize WebGPU
@@ -32,6 +22,10 @@ const init = async () => {
     });
 
     const canvas = document.getElementById("canvas-container");
+    //make canvas cover the entire window
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
     const context = canvas.getContext("webgpu");
     if (!context) {
         console.error(
@@ -39,7 +33,6 @@ const init = async () => {
         );
         return null;
     }
-
     // ~~ CONFIGURE THE SWAP CHAIN ~~
     const devicePixelRatio = window.devicePixelRatio || 1;
     const presentationSize = [
@@ -53,6 +46,30 @@ const init = async () => {
         format: presentationFormat,
         size: presentationSize,
     });
+
+    //TO DO: later - handle resize
+    //Handles window resize
+    // const observer = new ResizeObserver(entries => {
+    //     for (const entry of entries) {
+    //         const canvas = entry.target;
+    //         const width = entry.contentBoxSize[0].inlineSize;
+    //         const height = entry.contentBoxSize[0].blockSize;
+    //         canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
+    //         canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
+    //     }
+
+    //     const devicePixelRatio = window.devicePixelRatio || 1;
+    //     const presentationSize = [
+    //         canvas.clientWidth * devicePixelRatio,
+    //         canvas.clientHeight * devicePixelRatio,
+    //     ];
+    //     context.configure({
+    //         device,
+    //         format: presentationFormat,
+    //         size: presentationSize,
+    //     });
+    // });
+    // observer.observe(canvas);
 
     const multisampleCount = 4;
 
@@ -191,7 +208,7 @@ const init = async () => {
     {
         return fragData.color;
     } `;
-    
+
     const shaderModule = device.createShaderModule({
         code: displayCode
     });
