@@ -100,7 +100,7 @@ const init = async () => {
     const vertexBuffer = device.createBuffer({
         label: "vertex buffer",
         size: vertices.byteLength,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true,
     });
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
@@ -144,7 +144,7 @@ const init = async () => {
     new Int32Array(indexBuffer.getMappedRange()).set(indices);
     indexBuffer.unmap();
 
-    // ~~ SETUP UNIFORM BUFFER ~~
+    // ~~ SETUP UNIFORM BUFFER FOR DISPLAY SHADER MODULE ~~
     const objectPosition = [0, 0, 0];
     const cameraPosition = [0, 2, 4];
     const target = [0, 0, 0];
@@ -181,7 +181,7 @@ const init = async () => {
         ]
     });
 
-    // ~~ DEFINE BASIC SHADERS ~~
+    // ~~ DEFINE DISPLAY SHADER ~~
     //TO DO: find a way to load from a separate file
     const displayCode = /* wgsl */`
     struct VertexOut {
@@ -229,8 +229,71 @@ const init = async () => {
         return select(vec4(0.8, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), onLine);
     } `;
 
-    const shaderModule = device.createShaderModule({
+    const dispayShaderModule = device.createShaderModule({
         code: displayCode
+    });
+
+    // ~~ SETUP UNIFORM BUFFERS FOR COMPUTE SHADER MODULE ~~
+    // const computeUniformBuffer1 = createBuffer({
+    //     size: 16,
+    //     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    //     mappedAtCreation: true,
+    // });
+    // new Float32Array(computeUniformBuffer1.getMappedRange(0, 8)).set(new Float32Array([squareSideSize, squareSideSize]));
+    // new Uint32Array(computeUniformBuffer1.getMappedRange(0, 8)).set(new Uint32Array([cellWidth + 1, cellHeight + 1]));
+    // computeUniformBuffer1.unmap();
+    
+    const computeUniformBuffer1 = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const computeBindGroupLayout0 = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: {
+                    type: "storage",
+                },
+            }
+        ]
+    });
+    const computeBindGroupLayout1 = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: {
+                    type: "uniform",
+                },
+            }
+        ]
+    });
+
+    // ~~ SETUP COMPUTE SHADER MODULE ~~
+    const computeCode = /* wgsl */`
+        @group(0) @binding(0) var<storage, read_write> points : array<f32>;
+        @group(1) @binding(0) var<uniform> time : f32;
+
+        override size_x: f32 = 4.0;
+        override size_z: f32 = 4.0;
+        override numCells_x: u32 = 16;
+        override numCells_z: u32 = 16;
+
+        @compute @workgroup_size(1) 
+        fn compute(@builtin(global_invocation_id) id : vec3<u32>)
+        {
+            var xIdx = id.x / numCells_z;
+            var zIdx = id.x % numCells_z;
+            var x = f32(xIdx) * (size_x / f32(numCells_x)) - (size_x / 2.0);
+            var z = f32(zIdx) * (size_z / f32(numCells_z)) - (size_z / 2.0);
+            points[4 * id.x + 1] = sin(time + x);
+        }
+    `;
+    
+    const computeShaderModule = device.createShaderModule({
+        code: computeCode
     });
 
     // ~~ CREATE RENDER PIPELINE ~~
@@ -240,12 +303,12 @@ const init = async () => {
 
     const pipeline = device.createRenderPipeline({
         vertex: {
-        module: shaderModule,
+        module: dispayShaderModule,
         entryPoint: "vertex_main",
         buffers: vertexBuffersDescriptors,
         },
         fragment: {
-        module: shaderModule,
+        module: dispayShaderModule,
         entryPoint: "fragment_main",
         targets: [
             {
@@ -263,6 +326,26 @@ const init = async () => {
         layout: pipelineLayout,
     });
 
+    // ~~ CREATE COMPUTE PIPELINE ~~
+    const computePipelineLayout = device.createPipelineLayout({
+        bindGroupLayouts: [computeBindGroupLayout0, computeBindGroupLayout1]
+    });
+
+    const computePipeline = device.createComputePipeline({
+        label: "compute pipeline",
+        compute: {
+        module: computeShaderModule,
+        constants: {
+            size_x: squareSideSize, 
+            size_z: squareSideSize,
+            numCells_x: cellWidth + 1,
+            numCells_z: cellHeight + 1,
+        },
+        entryPoint: "compute",
+        },
+        layout: computePipelineLayout
+    });
+
     // ~~ CREATE BIND GROUP FOR UNIFORM BUFFER ~~
     const bindGroup = device.createBindGroup({
         layout: bindGroupLayout,
@@ -275,7 +358,33 @@ const init = async () => {
                 }
             },
         ],
-      });
+    });
+
+    const computeBindGroup0 = device.createBindGroup({
+        layout: computeBindGroupLayout0,
+        entries: [
+            {
+            binding: 0,
+            resource:
+                {
+                buffer: vertexBuffer
+                }
+            },
+        ],
+    });
+
+    const computeBindGroup1 = device.createBindGroup({
+        layout: computeBindGroupLayout1,
+        entries: [
+            {
+            binding: 0,
+            resource: 
+                {
+                buffer: computeUniformBuffer1
+                }
+            },
+        ],
+    });
 
     // ~~ CREATE RENDER PASS DESCRIPTOR ~~
     const renderPassDescriptor = {
@@ -290,6 +399,7 @@ const init = async () => {
 
     let multisampleTexture;
     // ~~ Define render loop ~~
+    let timeInit = performance.now();
     function frame() {
         const canvasTexture = context.getCurrentTexture();
         // ~~ CREATE MULTISAMPLE TEXTURE IF IT IS NOT YET CREATED OR HAS WRONG SIZE ~~
@@ -311,11 +421,21 @@ const init = async () => {
             });
         }
 
+        let time = (performance.now() - timeInit) / 10000.0;
+        device.queue.writeBuffer(computeUniformBuffer1, 0, new Float32Array([time, 0, 0, 0]), 0, 4);
         renderPassDescriptor.colorAttachments[0].view = multisampleTexture.createView();
         renderPassDescriptor.colorAttachments[0].resolveTarget = canvasTexture.createView();
+
         const commandEncoder = device.createCommandEncoder();
-        const passEncoder =
-        commandEncoder.beginRenderPass(renderPassDescriptor);
+
+        const computePassEncoder = commandEncoder.beginComputePass();
+        computePassEncoder.setPipeline(computePipeline);
+        computePassEncoder.setBindGroup(0, computeBindGroup0);
+        computePassEncoder.setBindGroup(1, computeBindGroup1);
+        computePassEncoder.dispatchWorkgroups((cellHeight + 1) * (cellWidth + 1));
+        computePassEncoder.end();
+
+        const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
 
         passEncoder.setPipeline(pipeline);
         passEncoder.setVertexBuffer(0, vertexBuffer);
