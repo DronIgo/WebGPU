@@ -64,12 +64,19 @@ const init = async () => {
     const cellSideSizeX = CLOTH_SIDE_SIZE / NUM_CELLS_X;
     const cellSideSizeZ = CLOTH_SIDE_SIZE / NUM_CELLS_Z;
     //num of floats per vertex (XYZW) * num of vertices per row * num of vertices per column
+    //we will use two separate arrays (and two separate buffers for vertices) to improve speed
+    //this way compute shader can run in parallel to display shader
     let vertices = new Float32Array(3 * (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1));
+    let vertices2 = new Float32Array(3 * (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1));
     let offset = 0;
+    let offset2 = 0;
     const addVertex = (x,z) => {
         vertices[offset++] = x;
         vertices[offset++] = 0.0;
         vertices[offset++] = z;
+        vertices2[offset2++] = x;
+        vertices2[offset2++] = 0.0;
+        vertices2[offset2++] = z;
     };
     for (let w = 0; w < NUM_CELLS_X + 1; w++) {
         for (let h = 0; h < NUM_CELLS_Z + 1; h++) {
@@ -86,6 +93,15 @@ const init = async () => {
     });
     new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
     vertexBuffer.unmap();
+
+    const vertexBuffer2 = device.createBuffer({
+        label: "vertex buffer 2",
+        size: vertices.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true,
+    });
+    new Float32Array(vertexBuffer2.getMappedRange()).set(vertices2);
+    vertexBuffer2.unmap();
 
     const vertexBuffersDescriptors = [
         {
@@ -323,6 +339,7 @@ const init = async () => {
     let frames = 0;
     let timePrev = 0.0;
     let timePass = 0.0;
+    let writeToVertices2 = false;
     function frame() {
         frames++;
         let time = (performance.now() - timeInit) / 1000.0;
@@ -334,6 +351,17 @@ const init = async () => {
             console.debug("fps: ", frames);
             frames = 0;
         }
+        //using fixed delta time 
+        deltaTime = 1.0 / 20.0;
+
+        writeToVertices2 = !writeToVertices2;
+        let verticesRead = vertices2;
+        let verticesWrite = vertices;
+        if (writeToVertices2) {
+            verticesRead = vertices;
+            verticesWrite = vertices2;
+        }
+
         const canvasTexture = context.getCurrentTexture();
         // ~~ CREATE MULTISAMPLE TEXTURE IF IT IS NOT YET CREATED OR HAS WRONG SIZE ~~
         if (!multisampleTexture ||
@@ -377,74 +405,76 @@ const init = async () => {
         renderPassDescriptor.colorAttachments[0].resolveTarget = canvasTexture.createView();
         renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
         {
+            verticesWrite[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2) * 3 + 1] = Math.sin(time) * 0.5;
+            
             if (useGravity) {
                 for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
                     if (simulate[i]) {
-                        velocities[3*i + 1] -= GRAVITY * deltaTime;
+                        velocities[3*i + 1] -= GRAVITY * deltaTime * verticesW[i];
                     }
                 }
             }
 
-            vertices[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2) * 3 + 1] = Math.sin(time) * 0.5;
             for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
                 if (simulate[i]) {
                     for (let v = 0; v < 3; ++v) {
-                        vertices[3*i + v] += velocities[3*i + v] * deltaTime;
+                        verticesWrite[3*i + v] = verticesRead[3*i + v] + velocities[3*i + v] * deltaTime;
                     }
                 }
             }
+
             for (let i = 0; i < NUM_ITERATIONS; ++i) {
                 bendConstr.forEach(c => {
-                    let p1 = [vertices[c.p1 * 3], vertices[c.p1 * 3 + 1], vertices[c.p1 * 3 + 2]];
-                    let p2 = [vertices[c.p2 * 3], vertices[c.p2 * 3 + 1], vertices[c.p2 * 3 + 2]];
-                    let p3 = [vertices[c.p3 * 3], vertices[c.p3 * 3 + 1], vertices[c.p3 * 3 + 2]];
-                    let p4 = [vertices[c.p4 * 3], vertices[c.p4 * 3 + 1], vertices[c.p4 * 3 + 2]];
-                    let phi = c.phi;
-                    let w1 = verticesW[c.p1];
-                    let w2 = verticesW[c.p2];
-                    let w3 = verticesW[c.p3];
-                    let w4 = verticesW[c.p4];
-                    let res = projectBendConstraint(p1, p2, p3, p4, phi, w1, w2, w3, w4);
-                    for (let v = 0; v < 3; ++v) {
-                        if (simulate[c.p1]) {
-                            velocities[c.p1 * 3 + c] = (res[0][v] - vertices[c.p1 * 3 + v]) / deltaTime;
-                            vertices[c.p1 * 3 + v] = res[0][v];
-                        }
-                        if (simulate[c.p2]) {
-                            velocities[c.p2 * 3 + c] = (res[1][v] - vertices[c.p2 * 3 + v]) / deltaTime;
-                            vertices[c.p2 * 3 + v] = res[1][v];
-                        }
-                        if (simulate[c.p3]) {
-                            velocities[c.p3 * 3 + c] = (res[2][v] - vertices[c.p3 * 3 + v]) / deltaTime;
-                            vertices[c.p3 * 3 + v] = res[2][v];
-                        }
-                        if (simulate[c.p4]) {
-                            velocities[c.p4 * 3 + c] = (res[3][v] - vertices[c.p4 * 3 + v]) / deltaTime;
-                            vertices[c.p4 * 3 + v] = res[3][v];
-                        }
-                    }
+                   let p1 = [verticesWrite[c.p1 * 3], verticesWrite[c.p1 * 3 + 1], verticesWrite[c.p1 * 3 + 2]];
+                   let p2 = [verticesWrite[c.p2 * 3], verticesWrite[c.p2 * 3 + 1], verticesWrite[c.p2 * 3 + 2]];
+                   let p3 = [verticesWrite[c.p3 * 3], verticesWrite[c.p3 * 3 + 1], verticesWrite[c.p3 * 3 + 2]];
+                   let p4 = [verticesWrite[c.p4 * 3], verticesWrite[c.p4 * 3 + 1], verticesWrite[c.p4 * 3 + 2]];
+                   let phi = c.phi;
+                   let w1 = verticesW[c.p1];
+                   let w2 = verticesW[c.p2];
+                   let w3 = verticesW[c.p3];
+                   let w4 = verticesW[c.p4];
+                   let s1 = simulate[c.p1];
+                   let s2 = simulate[c.p2];
+                   let s3 = simulate[c.p3];
+                   let s4 = simulate[c.p4];
+                   let res = projectBendConstraint(p1, p2, p3, p4, phi, w1, w2, w3, w4, s1, s2, s3, s4);
+                   for (let v = 0; v < 3; ++v) {
+                       if (simulate[c.p1])
+                           verticesWrite[c.p1 * 3 + v] = res[0][v];
+                       if (simulate[c.p2])
+                           verticesWrite[c.p2 * 3 + v] = res[1][v];
+                       if (simulate[c.p3])
+                           verticesWrite[c.p3 * 3 + v] = res[2][v];
+                       if (simulate[c.p4]) 
+                           verticesWrite[c.p4 * 3 + v] = res[3][v];
+                   }
                 });
                 stretchConstr.forEach(c => {
-                    let p1 = [vertices[c.p1 * 3], vertices[c.p1 * 3 + 1], vertices[c.p1 * 3 + 2]];
-                    let p2 = [vertices[c.p2 * 3], vertices[c.p2 * 3 + 1], vertices[c.p2 * 3 + 2]];
+                    let p1 = [verticesWrite[c.p1 * 3], verticesWrite[c.p1 * 3 + 1], verticesWrite[c.p1 * 3 + 2]];
+                    let p2 = [verticesWrite[c.p2 * 3], verticesWrite[c.p2 * 3 + 1], verticesWrite[c.p2 * 3 + 2]];
                     let w1 = verticesW[c.p1];
                     let w2 = verticesW[c.p2];
                     let d = c.l0;
-                    let res = projectStretchConstraint(p1, p2, d, w1, w2);
+                    let s1 = simulate[c.p1];
+                    let s2 = simulate[c.p2];
+                    let res = projectStretchConstraint(p1, p2, d, w1, w2, s1, s2);
                     for (let v = 0; v < 3; ++v) {
-                        if (simulate[c.p1]) {
-                            velocities[c.p1 * 3 + c] = (res[0][v] - vertices[c.p1 * 3 + v]) / deltaTime;
-                            vertices[c.p1 * 3 + v] = res[0][v];
-                        }
-                        if (simulate[c.p2]) {
-                            velocities[c.p2 * 3 + c] = (res[1][v] - vertices[c.p2 * 3 + v]) / deltaTime;
-                            vertices[c.p2 * 3 + v] = res[1][v];
-                        }
+                        if (simulate[c.p1])
+                            verticesWrite[c.p1 * 3 + v] = res[0][v];
+                        if (simulate[c.p2])
+                            verticesWrite[c.p2 * 3 + v] = res[1][v];
                     }
                 });
             }
+            for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
+                if (simulate[i]) {
+                    for (let v = 0; v < 3; ++v)
+                        velocities[3*i+v] = (verticesRead[3*i+v] - verticesWrite[3*i+v]) / deltaTime;
+                }
+            }
         }
-        device.queue.writeBuffer(vertexBuffer, 0, vertices, 0, vertices.length);
+        device.queue.writeBuffer(vertexBuffer, 0, verticesRead, 0, vertices.length);
         const commandEncoder = device.createCommandEncoder();
 
         // const computePassEncoder = commandEncoder.beginComputePass();
