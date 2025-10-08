@@ -1,6 +1,6 @@
 'use strict'
 
-import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS} from './constants.js'
+import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS, GRAVITY} from './constants.js'
 import { prepareDisplayShaderModule } from './displayModule.js';
 import { prepareComputeShaderModule, projectStretchConstraint, projectBendConstraint } from './computeModule.js';
 
@@ -50,6 +50,15 @@ const init = async () => {
     });
 
     const depthTextureFormat = 'depth32float';
+
+    // ~~ SETUP GRAVITY SWITCH ~~
+    let useGravity = false;
+    const gravitySwitch = document.getElementById('gravitySwitch');
+
+    gravitySwitch.addEventListener('change', function() {
+        useGravity = this.checked; 
+    });
+    useGravity = gravitySwitch.checked;
 
     // ~~ SETUP VERTICES (position (vec4<f32>)) ~~
     const cellSideSizeX = CLOTH_SIDE_SIZE / NUM_CELLS_X;
@@ -368,7 +377,15 @@ const init = async () => {
         renderPassDescriptor.colorAttachments[0].resolveTarget = canvasTexture.createView();
         renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
         {
-            vertices[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2) * 3 + 1] = Math.sin(time);
+            if (useGravity) {
+                for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
+                    if (simulate[i]) {
+                        velocities[3*i + 1] -= GRAVITY * deltaTime;
+                    }
+                }
+            }
+
+            vertices[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2) * 3 + 1] = Math.sin(time) * 0.5;
             for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
                 if (simulate[i]) {
                     for (let v = 0; v < 3; ++v) {
