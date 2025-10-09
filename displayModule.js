@@ -3,6 +3,7 @@ const displayCode = /* wgsl */`
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
     @location(0) bar : vec2<f32>,
+    @location(1) depth : f32,
 };
 
 struct Uniforms {
@@ -15,11 +16,11 @@ struct Uniforms {
 @vertex
 fn vertex_main(
     @builtin(vertex_index) vertexIndex : u32,
-    @location(0) position: vec4<f32>
+    @location(0) position: vec3<f32>
 ) -> VertexOut
 {
     var output : VertexOut;
-    output.position = uni.mvp * position;
+    output.position = uni.mvp * vec4(position, 1.0);
     var xIndex = vertexIndex % uni.col;
     var yIndex = vertexIndex / uni.col;
     //analogue of baricentric coordinates for each cell values will look similiar to following:
@@ -28,6 +29,7 @@ fn vertex_main(
     //(0,0)--(1,0)
     //which will allow as to check whether pixel is close to the side of cell or not in the fragment shader
     output.bar = vec2(f32(xIndex % 2), f32(yIndex % 2));
+    output.depth = output.position.z / output.position.w;
     return output;
 } 
 
@@ -42,7 +44,8 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32>
     var bar4 = vec4(bar, vec2(1.0) - bar);
     var thold4 = vec4(d * lineWidth, d * lineWidth);
     var onLine = any(vec4<bool>(bar4 < thold4));
-    return select(vec4(0.8, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), onLine);
+    var depth = fragData.depth;
+    return select(vec4(depth, 0.8, 0.8, 1.0), vec4(0.0, 0.0, 0.0, 1.0), onLine);
 } `;
 
 import { mat4, vec3 } from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.js';
@@ -64,7 +67,7 @@ export function prepareDisplayShaderModule(device, screen_aspect, NUM_CELLS_Z) {
     const aspect = screen_aspect;
     const near = 0.1;
     const far = 100;
-
+    
     const modelMatrix = mat4.translation(objectPosition);
     const viewMatrix = mat4.lookAt(cameraPosition, target, up);
     const projectionMatrix = mat4.perspective(fovX, aspect, near, far);
