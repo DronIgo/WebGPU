@@ -145,9 +145,9 @@ fn projectBend(_p1 : vec3<f32>, _p2 : vec3<f32>, _p3 : vec3<f32>, _p4 : vec3<f32
     d = clamp(d, -1.0, 1.0);
     var q3 = s3 * (cross(p2, n2) + (cross(n1, p2) * d)) / length(c23);
     var q4 = s4 * (cross(p2, n1) + (cross(n2, p2) * d)) / length(c24);
-    var q2 = s2 * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
+    var q2 = -s2 * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
         (cross(p4, n1) + (cross(n2, p4) * d)) / length(c24));
-    var  q1 = s1 * (q2 + q3 + q4);
+    var  q1 = -s1 * (q2 + q3 + q4);
 
     var denom = w1 * dot(q1, q1) + w2 * dot(q2, q2) + 
         w3 * dot(q3, q3) + w4 * dot(q4, q4);
@@ -173,6 +173,7 @@ struct PerFrameVars
 {
     deltaTime: f32,
     gravity: f32,
+    time: f32,
 };
 
 @group(0) @binding(0) var<storage, read> verticesR : array<f32>;
@@ -188,7 +189,6 @@ override size_x: f32 = 4.0;
 override size_z: f32 = 4.0;
 override numCells_x: u32 = 4;
 override numCells_z: u32 = 4;
-
 override wg_x: i32 = 64;
 @compute @workgroup_size(wg_x, 1, 1) 
 fn compute(@builtin(global_invocation_id) id : vec3<u32>)
@@ -196,12 +196,17 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     if (id.x >= (numCells_x + 1) * (numCells_z + 1)) {
         return;
     }
+    //var idxOfCenter = (numCells_z + 1) * (numCells_x / 2) + (numCells_z / 2);
     var s = select(0.0, 1.0, invMass[id.x] > 0.0);
     var v = vec3<f32>(velocities[3 * id.x], velocities[3 * id.x + 1], velocities[3 * id.x + 2]);
     v.y -= perFrame.gravity * perFrame.deltaTime * s;
-    verticesW[3 * id.x] = verticesR[3 * id.x] + v.x * perFrame.deltaTime * s;
-    verticesW[3 * id.x + 1] = verticesR[3 * id.x + 1] + v.y * perFrame.deltaTime * s;
-    verticesW[3 * id.x + 2] = verticesR[3 * id.x + 2] + v.z * perFrame.deltaTime * s;
+    // if (id.x == idxOfCenter) {
+    //     verticesW[3 * id.x + 1] = sin(perFrame.time) * 0.3;
+    // } else {
+        verticesW[3 * id.x] = verticesR[3 * id.x] + v.x * perFrame.deltaTime * s;
+        verticesW[3 * id.x + 1] = verticesR[3 * id.x + 1] + v.y * perFrame.deltaTime * s;
+        verticesW[3 * id.x + 2] = verticesR[3 * id.x + 2] + v.z * perFrame.deltaTime * s;
+    //}
 }
 `;
 

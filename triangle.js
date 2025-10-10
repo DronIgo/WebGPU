@@ -360,25 +360,12 @@ const init = async () => {
     let multisampleTexture;
     let depthTexture;
     // ~~ Define render loop ~~
-    let timeInit = performance.now();
-    let frames = 0;
-    let timePrev = 0.0;
-    let timePass = 0.0;
     let writeToVertices2 = false;
+    let time = 0.0;
     function frame() {
-        frames++;
-        let time = (performance.now() - timeInit) / 1000.0;
-        let deltaTime = time - timePrev;
-        timePrev = time;
-        timePass += deltaTime;
-        if (timePass > 1.0) {
-            timePass -= 1.0;
-            console.debug("fps: ", frames);
-            frames = 0;
-        }
         //using fixed delta time 
-        deltaTime = 1.0 / 20.0;
-
+        let deltaTime = 1.0 / 20.0;
+        time += deltaTime;
         writeToVertices2 = !writeToVertices2;
         let bgVerticesRW = bindGroupVertR2W1;
         let bgVerticesCP = bindGroupVertP2C1;
@@ -434,7 +421,7 @@ const init = async () => {
         renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
 
         let gravity = useGravity ? 1.0 : 0.0;
-        device.queue.writeBuffer(compute.perFrameUniormBuffer, 0, new Float32Array([deltaTime, gravity, 0, 0]), 0, 4);
+        device.queue.writeBuffer(compute.perFrameUniormBuffer, 0, new Float32Array([deltaTime, gravity, time, 0]), 0, 4);
 
         const commandEncoder = device.createCommandEncoder();
 
