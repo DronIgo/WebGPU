@@ -12,8 +12,7 @@ struct DeltasStretch {
 
 @group(0) @binding(0) var<storage, read_write> vertices : array<f32>;
 //group 1 is not updated in runtime
-@group(1) @binding(0) var<storage, read> simulated : array<i32>;
-@group(1) @binding(1) var<storage, read> invMass : array<f32>;
+@group(1) @binding(0) var<storage, read> invMass : array<f32>;
 
 @group(2) @binding(0) var<storage, read> stretchIdx : array<StretchConstrIdx>;
 @group(2) @binding(1) var<storage, read> stretchD : array<f32>;
@@ -38,9 +37,7 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     var p2 = vec3<f32>(vertices[idx2 * 3], vertices[idx2 * 3 + 1], vertices[idx2 * 3 + 2]);
     var w1 = invMass[idx1];
     var w2 = invMass[idx2];
-    var s1 = simulated[idx1];
-    var s2 = simulated[idx2];
-    var deltas = projectStretch(p1, p2, d, w1, w2, s1, s2);
+    var deltas = projectStretch(p1, p2, d, w1, w2);
     vertices[idx1 * 3] = p1.x + deltas.dp1.x;
     vertices[idx1 * 3 + 1] = p1.y + deltas.dp1.y;
     vertices[idx1 * 3 + 2] = p1.z + deltas.dp1.z;
@@ -50,13 +47,13 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     vertices[idx2 * 3 + 2] = p2.z + deltas.dp2.z;
 }
 
-fn projectStretch(p1 : vec3<f32>, p2 : vec3<f32>, d : f32, w1 : f32, w2 : f32, s1 : i32, s2 : i32) -> DeltasStretch{
+fn projectStretch(p1 : vec3<f32>, p2 : vec3<f32>, d : f32, w1 : f32, w2 : f32) -> DeltasStretch{
     var diff = p1 - p2;
     var diffNorm = normalize(diff);
     var diffLen = length(diff);
-    var denom = f32(s1) * w1 + f32(s2) * w2;
-    var dp1 = select(vec3<f32>(0.0, 0.0, 0.0), diffNorm * (-w1 * f32(s1) / denom) * (diffLen - d), denom != 0.0);
-    var dp2 = select(vec3<f32>(0.0, 0.0, 0.0), diffNorm * (w2 * f32(s2) / denom) * (diffLen - d), denom != 0.0);
+    var denom = w1 + w2;
+    var dp1 = select(vec3<f32>(0.0, 0.0, 0.0), diffNorm * (-w1 / denom) * (diffLen - d), denom != 0.0);
+    var dp2 = select(vec3<f32>(0.0, 0.0, 0.0), diffNorm * (w2 / denom) * (diffLen - d), denom != 0.0);
     var deltas : DeltasStretch;
     deltas.dp1 = dp1;
     deltas.dp2 = dp2;
@@ -75,8 +72,7 @@ struct BendConstrIdx {
 
 @group(0) @binding(0) var<storage, read_write> vertices : array<f32>;
 //group 1 is not updated in runtime
-@group(1) @binding(0) var<storage, read> simulated : array<i32>;
-@group(1) @binding(1) var<storage, read> invMass : array<f32>;
+@group(1) @binding(0) var<storage, read> invMass : array<f32>;
 
 @group(2) @binding(0) var<storage, read> bendIdx : array<BendConstrIdx>;
 @group(2) @binding(1) var<storage, read> bendPhi : array<f32>;
@@ -107,11 +103,7 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     var w2 = invMass[idx2];
     var w3 = invMass[idx3];
     var w4 = invMass[idx4];
-    var s1 = simulated[idx1];
-    var s2 = simulated[idx2];
-    var s3 = simulated[idx3];
-    var s4 = simulated[idx4];
-    var deltas = projectBend(p1, p2, p3, p4, phi, w1, w2, w3, w4, s1, s2, s3, s4);
+    var deltas = projectBend(p1, p2, p3, p4, phi, w1, w2, w3, w4);
     vertices[idx1 * 3] = p1.x + deltas.dp1.x;
     vertices[idx1 * 3 + 1] = p1.y + deltas.dp1.y;
     vertices[idx1 * 3 + 2] = p1.z + deltas.dp1.z;
@@ -137,22 +129,25 @@ struct DeltasBend{
 };
 
 fn projectBend(_p1 : vec3<f32>, _p2 : vec3<f32>, _p3 : vec3<f32>, _p4 : vec3<f32>, phi : f32, 
-                w1 : f32, w2 : f32, w3 : f32, w4 : f32, 
-                s1 : i32, s2 : i32, s3 : i32, s4 : i32) -> DeltasBend {
+                w1 : f32, w2 : f32, w3 : f32, w4 : f32) -> DeltasBend {
     var p2 = _p2 - _p1;
     var p3 = _p3 - _p1;
     var p4 = _p4 - _p1;
+    var s1 = select(0.0, 1.0, w1 > 0.0);
+    var s2 = select(0.0, 1.0, w2 > 0.0);
+    var s3 = select(0.0, 1.0, w3 > 0.0);
+    var s4 = select(0.0, 1.0, w4 > 0.0);
     var c23 = cross(p2, p3);
     var c24 = cross(p2, p4);
     var n1 = normalize(c23);
     var n2 = normalize(c24);
     var d = dot(n1, n2);
     d = clamp(d, -1.0, 1.0);
-    var q3 = f32(s3) * (cross(p2, n2) + (cross(n1, p2) * d)) / length(c23);
-    var q4 = f32(s4) * (cross(p2, n1) + (cross(n2, p2) * d)) / length(c24);
-    var q2 = f32(-s2) * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
+    var q3 = s3 * (cross(p2, n2) + (cross(n1, p2) * d)) / length(c23);
+    var q4 = s4 * (cross(p2, n1) + (cross(n2, p2) * d)) / length(c24);
+    var q2 = s2 * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
         (cross(p4, n1) + (cross(n2, p4) * d)) / length(c24));
-    var  q1 = f32(-s1) * (q2 + q3 + q4);
+    var  q1 = s1 * (q2 + q3 + q4);
 
     var denom = w1 * dot(q1, q1) + w2 * dot(q2, q2) + 
         w3 * dot(q3, q3) + w4 * dot(q4, q4);
@@ -183,8 +178,7 @@ struct PerFrameVars
 @group(0) @binding(0) var<storage, read> verticesR : array<f32>;
 @group(0) @binding(1) var<storage, read_write> verticesW : array<f32>;
 
-@group(1) @binding(0) var<storage, read> simulated : array<i32>;
-@group(1) @binding(1) var<storage, read> invMass : array<f32>;
+@group(1) @binding(0) var<storage, read> invMass : array<f32>;
 
 @group(2) @binding(0) var<storage, read> velocities : array<f32>;
 
@@ -202,7 +196,7 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     if (id.x >= (numCells_x + 1) * (numCells_z + 1)) {
         return;
     }
-    var s = f32(simulated[id.x]);
+    var s = select(0.0, 1.0, invMass[id.x] > 0.0);
     var v = vec3<f32>(velocities[3 * id.x], velocities[3 * id.x + 1], velocities[3 * id.x + 2]);
     v.y -= perFrame.gravity * perFrame.deltaTime * s;
     verticesW[3 * id.x] = verticesR[3 * id.x] + v.x * perFrame.deltaTime * s;
@@ -404,7 +398,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const stretchPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
             bindGroupLayoutS,
-            bindGroupLayoutRSRS,
+            bindGroupLayoutRS,
             bindGroupLayoutRSRSU
         ]
     });
@@ -431,7 +425,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const bendPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
             bindGroupLayoutS,
-            bindGroupLayoutRSRS,
+            bindGroupLayoutRS,
             bindGroupLayoutRSRSU
         ]
     });
@@ -458,7 +452,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const updateInitPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
             bindGroupLayoutRSS,
-            bindGroupLayoutRSRS,
+            bindGroupLayoutRS,
             bindGroupLayoutRS,
             bindGroupLayoutU
         ]
@@ -482,7 +476,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
 
     result.updateInitPipeline = updateInitPipeline;
 
-    // ~~ CREATE UPDATE INIT PIPELINE ~~
+    // ~~ CREATE UPDATE FINAL PIPELINE ~~
     const updateFinalPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
             bindGroupLayoutRSRS,

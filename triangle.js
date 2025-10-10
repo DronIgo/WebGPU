@@ -137,17 +137,11 @@ const init = async () => {
                 invMass[getIdxByPos(w, h)] = 1.0 / 6.0;
         }
     }
-    
-    //1 - simulate vertex using PBD, 0 - don't change it's position through PBD
-    let simulate = new Int32Array((NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1));
-    for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
-        simulate[i] = 1;
-    }
-    simulate[getIdxByPos(0,0)] = 0;
-    simulate[getIdxByPos(NUM_CELLS_X,0)] = 0;
-    simulate[getIdxByPos(0,NUM_CELLS_Z)] = 0;
-    simulate[getIdxByPos(NUM_CELLS_X,NUM_CELLS_Z)] = 0;
-    simulate[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2)] = 0;
+    invMass[getIdxByPos(0,0)] = 0.0;
+    invMass[getIdxByPos(NUM_CELLS_X,0)] = 0.0;
+    invMass[getIdxByPos(0,NUM_CELLS_Z)] = 0.0;
+    invMass[getIdxByPos(NUM_CELLS_X,NUM_CELLS_Z)] = 0.0;
+    invMass[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2)] = 0.0;
 
     let velocities = new Float32Array(3 * (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1));
     for (let i = 0; i < 3 * (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
@@ -155,8 +149,6 @@ const init = async () => {
     }
 
     let velocitiesBuffer = createFloatBuffer(device, velocities, "velocities buffer", {s:true});
-
-    let simulatedBuffer = createIntBuffer(device, simulate, "simulated buffer", {s : true});
 
     let invMassBuffer = createFloatBuffer(device, invMass, "inv mass buffer", {s : true});
 
@@ -166,18 +158,11 @@ const init = async () => {
     // ~~ PREPARE COMPUTE PIPELINES (as well as all related uniform buffers, bind group layouts and bind groups) ~~
     let compute = prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE);
 
-    let bindGroupSimulatedInvMass = device.createBindGroup({
-        layout: compute.bindGroupLayoutRSRS,
+    let bindGroupInvMass = device.createBindGroup({
+        layout: compute.bindGroupLayoutRS,
         entries: [
             { 
             binding: 0, 
-            resource:  
-                { 
-                buffer: simulatedBuffer
-                }
-            },
-            { 
-            binding: 1, 
             resource:  
                 { 
                 buffer: invMassBuffer
@@ -252,7 +237,7 @@ const init = async () => {
         ],
     });
 
-        let bindGroupVertP1C2 = device.createBindGroup({
+    let bindGroupVertP1C2 = device.createBindGroup({
         layout: compute.bindGroupLayoutRSRS,
         entries: [
             { 
@@ -395,15 +380,11 @@ const init = async () => {
         deltaTime = 1.0 / 20.0;
 
         writeToVertices2 = !writeToVertices2;
-        let verticesRead = vertices2;
-        let verticesWrite = vertices;
         let bgVerticesRW = bindGroupVertR2W1;
         let bgVerticesCP = bindGroupVertP2C1;
         let bgVerticesComp = bindGroupVert1;
         let vertexBufferDisp = vertexBuffer2;
         if (writeToVertices2) {
-            verticesRead = vertices;
-            verticesWrite = vertices2;
             bgVerticesRW = bindGroupVertR1W2;
             bgVerticesCP = bindGroupVertP1C2;
             bgVerticesComp = bindGroupVert2;
@@ -461,7 +442,7 @@ const init = async () => {
         //Update positions 
         computePassEncoder.setPipeline(compute.updateInitPipeline);
         computePassEncoder.setBindGroup(0, bgVerticesRW);
-        computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
+        computePassEncoder.setBindGroup(1, bindGroupInvMass);
         computePassEncoder.setBindGroup(2, bindGroupVelocitiesReadOnly);
         computePassEncoder.setBindGroup(3, compute.bindGroupPerFrame);
         computePassEncoder.dispatchWorkgroups(Math.ceil((NUM_CELLS_Z + 1) * (NUM_CELLS_X + 1) / WORKGROUP_SIZE));
@@ -470,7 +451,7 @@ const init = async () => {
         for (let i = 0; i < NUM_ITERATIONS; ++i) {
             computePassEncoder.setPipeline(compute.bendPipeline);
             computePassEncoder.setBindGroup(0, bgVerticesComp);
-            computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
+            computePassEncoder.setBindGroup(1, bindGroupInvMass);
             constrBG.bend.forEach((bg) => {
                 computePassEncoder.setBindGroup(2, bg.bg);
                 computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / WORKGROUP_SIZE));
@@ -478,7 +459,7 @@ const init = async () => {
 
             computePassEncoder.setPipeline(compute.stretchPipeline);
             computePassEncoder.setBindGroup(0, bgVerticesComp);
-            computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
+            computePassEncoder.setBindGroup(1, bindGroupInvMass);
             constrBG.stretch.forEach((bg) => {
                 computePassEncoder.setBindGroup(2, bg.bg);
                 computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / WORKGROUP_SIZE));
