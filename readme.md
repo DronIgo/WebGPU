@@ -13,8 +13,8 @@
 
       #gravityLabel {
         position: absolute;
-        top: 10px;
-        left: 10px;
+        top: 100px;
+        left: 80px;
       }
 
       span {
