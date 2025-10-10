@@ -189,6 +189,8 @@ override size_x: f32 = 4.0;
 override size_z: f32 = 4.0;
 override numCells_x: u32 = 4;
 override numCells_z: u32 = 4;
+override idxOfCenter: u32 = 12;
+override amp: f32 = 0.5;
 override wg_x: i32 = 64;
 @compute @workgroup_size(wg_x, 1, 1) 
 fn compute(@builtin(global_invocation_id) id : vec3<u32>)
@@ -196,17 +198,16 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     if (id.x >= (numCells_x + 1) * (numCells_z + 1)) {
         return;
     }
-    //var idxOfCenter = (numCells_z + 1) * (numCells_x / 2) + (numCells_z / 2);
     var s = select(0.0, 1.0, invMass[id.x] > 0.0);
     var v = vec3<f32>(velocities[3 * id.x], velocities[3 * id.x + 1], velocities[3 * id.x + 2]);
     v.y -= perFrame.gravity * perFrame.deltaTime * s;
-    // if (id.x == idxOfCenter) {
-    //     verticesW[3 * id.x + 1] = sin(perFrame.time) * 0.3;
-    // } else {
+    if (id.x == idxOfCenter) {
+        verticesW[3 * id.x + 1] = sin(perFrame.time) * amp;
+    } else {
         verticesW[3 * id.x] = verticesR[3 * id.x] + v.x * perFrame.deltaTime * s;
         verticesW[3 * id.x + 1] = verticesR[3 * id.x + 1] + v.y * perFrame.deltaTime * s;
         verticesW[3 * id.x + 2] = verticesR[3 * id.x + 2] + v.z * perFrame.deltaTime * s;
-    //}
+    }
 }
 `;
 
@@ -244,7 +245,7 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
 }
 `;
 
-export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE) {
+export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE, SIN_AMP) {
     let result = {};
 
     // ~~ CREATE COMPUTE SHADER MODULE ~~
@@ -470,9 +471,11 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
             constants: {
                 size_x: CLOTH_SIDE_SIZE,
                 size_z: CLOTH_SIDE_SIZE,
-                numCells_x: NUM_CELLS_X + 1,
-                numCells_z: NUM_CELLS_Z + 1,
+                numCells_x: NUM_CELLS_X,
+                numCells_z: NUM_CELLS_Z,
                 wg_x: WORKGROUP_SIZE,
+                idxOfCenter: (NUM_CELLS_Z + 1) * (NUM_CELLS_X / 2) + NUM_CELLS_Z / 2,
+                amp: SIN_AMP,
             },
             entryPoint: "compute",
         },

@@ -34,7 +34,7 @@ fn vertex_main(
 } 
 
 //desired width of wireframe lines in pixels
-const lineWidth : f32 = 1.0;
+const lineWidth : f32 = 0.5;
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32>
 {
@@ -49,7 +49,7 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4<f32>
 } `;
 
 import { mat4, vec3 } from 'https://wgpu-matrix.org/dist/3.x/wgpu-matrix.module.js';
-export function prepareDisplayShaderModule(device, screen_aspect, NUM_CELLS_Z) {
+export function prepareDisplayShaderModule(device, screen_aspect, NUM_CELLS_Z, CAMERA_Y, CAMERA_Z) {
     let result = {};
 
     // ~~ CREATE SHADER MODULE ~~
@@ -60,7 +60,7 @@ export function prepareDisplayShaderModule(device, screen_aspect, NUM_CELLS_Z) {
 
      // ~~ SETUP UNIFORM BUFFER FOR DISPLAY SHADER MODULE ~~
     const objectPosition = [0, 0, 0];
-    const cameraPosition = [0, 2, 4];
+    const cameraPosition = [0, CAMERA_Y, CAMERA_Z];
     const target = [0, 0, 0];
     const up = [0, 1, 0];
     const fovX = 60 * Math.PI / 180;

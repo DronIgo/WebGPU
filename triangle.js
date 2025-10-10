@@ -1,9 +1,26 @@
 'use strict'
 
-import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS, GRAVITY, WORKGROUP_SIZE} from './constants.js'
+import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS, GRAVITY, WORKGROUP_SIZE, CAMERA_Y, CAMERA_Z, SIN_AMP } from './constants.js'
 import { prepareDisplayShaderModule } from './displayModule.js';
 import { prepareComputeShaderModule, projectStretchConstraint, projectBendConstraint } from './computeModule.js';
 import { generateConstraintBindGroups, createIntBuffer, createFloatBuffer } from './constraints.js';
+
+//https://stackoverflow.com/questions/2450954/how-to-randomize-shuffle-a-javascript-array
+function shuffle(array) {
+    let currentIndex = array.length;
+
+    // While there remain elements to shuffle...
+    while (currentIndex != 0) {
+
+        // Pick a remaining element...
+        let randomIndex = Math.floor(Math.random() * currentIndex);
+        currentIndex--;
+
+        // And swap it with the current element.
+        [array[currentIndex], array[randomIndex]] = [
+        array[randomIndex], array[currentIndex]];
+    }
+}
 
 const init = async () => {
     // ~~ INITIALIZE ~~ Make sure we can initialize WebGPU
@@ -153,10 +170,10 @@ const init = async () => {
     let invMassBuffer = createFloatBuffer(device, invMass, "inv mass buffer", {s : true});
 
     // ~~ PREPARE DISPLAY SHADER MODULE (as well as all related uniform buffers, bind group layouts and bind groups) ~~
-    let dispSM = prepareDisplayShaderModule(device, canvas.clientWidth / canvas.clientHeight, NUM_CELLS_Z);
+    let dispSM = prepareDisplayShaderModule(device, canvas.clientWidth / canvas.clientHeight, NUM_CELLS_Z, CAMERA_Y, CAMERA_Z);
 
     // ~~ PREPARE COMPUTE PIPELINES (as well as all related uniform buffers, bind group layouts and bind groups) ~~
-    let compute = prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE);
+    let compute = prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE, SIN_AMP);
 
     let bindGroupInvMass = device.createBindGroup({
         layout: compute.bindGroupLayoutRS,
@@ -306,6 +323,10 @@ const init = async () => {
     // ~~ CREATE CONSTRAINTS ~~
     let constrBG = generateConstraintBindGroups(device, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, getIdxByPos, compute.bindGroupLayoutRSRSU);
 
+    //Solving constraints system using Gauss-Seidel is prone to artifacts due to the fact that ordering of the constraints matters
+    //We shuffle the order of the constraints to reduce this effect
+    shuffle(constrBG.bend);
+    shuffle(constrBG.stretch);
     // ~~ CREATE RENDER PIPELINE ~~
     const pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: dispSM.bindGroupLayouts

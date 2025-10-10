@@ -335,9 +335,9 @@ export function generateConstraintBindGroups(device, NUM_CELLS_X, NUM_CELLS_Z, C
 
     let res = {
         stretch: [bgSV0, bgSV1, bgSH0, bgSH1, bgSD0, bgSD1],
-        bend : [bgBC00, bgBC01, bgBC10, bgBC11, 
-                bgBD00, bgBD01, bgBD10, bgBD11, 
-                bgBL00, bgBL01, bgBL10, bgBL11],
+        bend : [bgBD00, bgBD01, bgBD10, bgBD11,
+                bgBL00, bgBL01, bgBL10, bgBL11,
+                bgBC00, bgBC01, bgBC10, bgBC11],
     };
     return res;
 }
