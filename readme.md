@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -15,11 +15,11 @@
       #gravityLabel {
         position: absolute;
         top: 100px;
-        left: 80px;
+        left: 10px;
       }
 
       span {
-        color: white;
+        color: black;
       }
     </style>
   </head>
