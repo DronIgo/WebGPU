@@ -1,6 +1,6 @@
 'use strict'
 
-import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS, GRAVITY} from './constants.js'
+import {MULTISAMPLE_COUNT, NUM_CELLS_X, NUM_CELLS_Z, CLOTH_SIDE_SIZE, NUM_ITERATIONS, GRAVITY, WORKGROUP_SIZE} from './constants.js'
 import { prepareDisplayShaderModule } from './displayModule.js';
 import { prepareComputeShaderModule, projectStretchConstraint, projectBendConstraint } from './computeModule.js';
 import { generateConstraintBindGroups, createIntBuffer, createFloatBuffer } from './constraints.js';
@@ -164,7 +164,7 @@ const init = async () => {
     let dispSM = prepareDisplayShaderModule(device, canvas.clientWidth / canvas.clientHeight, NUM_CELLS_Z);
 
     // ~~ PREPARE COMPUTE PIPELINES (as well as all related uniform buffers, bind group layouts and bind groups) ~~
-    let compute = prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z);
+    let compute = prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE);
 
     let bindGroupSimulatedInvMass = device.createBindGroup({
         layout: compute.bindGroupLayoutRSRS,
@@ -448,81 +448,9 @@ const init = async () => {
             });
         }
 
-        //device.queue.writeBuffer(computeSM.uniormBuffer, 0, new Float32Array([time, 0, 0, 0]), 0, 4);
         renderPassDescriptor.colorAttachments[0].view = multisampleTexture.createView();
         renderPassDescriptor.colorAttachments[0].resolveTarget = canvasTexture.createView();
         renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
-        // {
-        //     verticesWrite[getIdxByPos(NUM_CELLS_X / 2, NUM_CELLS_Z / 2) * 3 + 1] = Math.sin(time) * 0.5;
-            
-        //     if (useGravity) {
-        //         for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
-        //             if (simulate[i]) {
-        //                 velocities[3*i + 1] -= GRAVITY * deltaTime * invMass[i];
-        //             }
-        //         }
-        //     }
-
-        //     for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
-        //         if (simulate[i]) {
-        //             for (let v = 0; v < 3; ++v) {
-        //                 verticesWrite[3*i + v] = verticesRead[3*i + v] + velocities[3*i + v] * deltaTime;
-        //             }
-        //         }
-        //     }
-
-        //     for (let i = 0; i < NUM_ITERATIONS; ++i) {
-        //         bendConstr.forEach(c => {
-        //            let p1 = [verticesWrite[c.p1 * 3], verticesWrite[c.p1 * 3 + 1], verticesWrite[c.p1 * 3 + 2]];
-        //            let p2 = [verticesWrite[c.p2 * 3], verticesWrite[c.p2 * 3 + 1], verticesWrite[c.p2 * 3 + 2]];
-        //            let p3 = [verticesWrite[c.p3 * 3], verticesWrite[c.p3 * 3 + 1], verticesWrite[c.p3 * 3 + 2]];
-        //            let p4 = [verticesWrite[c.p4 * 3], verticesWrite[c.p4 * 3 + 1], verticesWrite[c.p4 * 3 + 2]];
-        //            let phi = c.phi;
-        //            let w1 = invMass[c.p1];
-        //            let w2 = invMass[c.p2];
-        //            let w3 = invMass[c.p3];
-        //            let w4 = invMass[c.p4];
-        //            let s1 = simulate[c.p1];
-        //            let s2 = simulate[c.p2];
-        //            let s3 = simulate[c.p3];
-        //            let s4 = simulate[c.p4];
-        //            let res = projectBendConstraint(p1, p2, p3, p4, phi, w1, w2, w3, w4, s1, s2, s3, s4);
-        //            for (let v = 0; v < 3; ++v) {
-        //                if (simulate[c.p1])
-        //                    verticesWrite[c.p1 * 3 + v] = res[0][v];
-        //                if (simulate[c.p2])
-        //                    verticesWrite[c.p2 * 3 + v] = res[1][v];
-        //                if (simulate[c.p3])
-        //                    verticesWrite[c.p3 * 3 + v] = res[2][v];
-        //                if (simulate[c.p4]) 
-        //                    verticesWrite[c.p4 * 3 + v] = res[3][v];
-        //            }
-        //         });
-        //         stretchConstr.forEach(c => {
-        //             let p1 = [verticesWrite[c.p1 * 3], verticesWrite[c.p1 * 3 + 1], verticesWrite[c.p1 * 3 + 2]];
-        //             let p2 = [verticesWrite[c.p2 * 3], verticesWrite[c.p2 * 3 + 1], verticesWrite[c.p2 * 3 + 2]];
-        //             let w1 = invMass[c.p1];
-        //             let w2 = invMass[c.p2];
-        //             let d = c.l0;
-        //             let s1 = simulate[c.p1];
-        //             let s2 = simulate[c.p2];
-        //             let res = projectStretchConstraint(p1, p2, d, w1, w2, s1, s2);
-        //             for (let v = 0; v < 3; ++v) {
-        //                 if (simulate[c.p1])
-        //                     verticesWrite[c.p1 * 3 + v] = res[0][v];
-        //                 if (simulate[c.p2])
-        //                     verticesWrite[c.p2 * 3 + v] = res[1][v];
-        //             }
-        //         });
-        //     }
-        //     for (let i = 0; i < (NUM_CELLS_X + 1) * (NUM_CELLS_Z + 1); ++i) {
-        //         if (simulate[i]) {
-        //             for (let v = 0; v < 3; ++v)
-        //                 velocities[3*i+v] = (verticesRead[3*i+v] - verticesWrite[3*i+v]) / deltaTime;
-        //         }
-        //     }
-        //     device.queue.writeBuffer(vertexBuffer, 0, verticesRead, 0, vertices.length);
-        // }
 
         let gravity = useGravity ? 1.0 : 0.0;
         device.queue.writeBuffer(compute.perFrameUniormBuffer, 0, new Float32Array([deltaTime, gravity, 0, 0]), 0, 4);
@@ -536,7 +464,7 @@ const init = async () => {
         computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
         computePassEncoder.setBindGroup(2, bindGroupVelocitiesReadOnly);
         computePassEncoder.setBindGroup(3, compute.bindGroupPerFrame);
-        computePassEncoder.dispatchWorkgroups(Math.ceil((NUM_CELLS_Z + 1) * (NUM_CELLS_X + 1) / 64.0));
+        computePassEncoder.dispatchWorkgroups(Math.ceil((NUM_CELLS_Z + 1) * (NUM_CELLS_X + 1) / WORKGROUP_SIZE));
 
         //Solve Gauss-Seidel for constraaints
         for (let i = 0; i < NUM_ITERATIONS; ++i) {
@@ -545,7 +473,7 @@ const init = async () => {
             computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
             constrBG.bend.forEach((bg) => {
                 computePassEncoder.setBindGroup(2, bg.bg);
-                computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / 64.0));
+                computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / WORKGROUP_SIZE));
             });
 
             computePassEncoder.setPipeline(compute.stretchPipeline);
@@ -553,15 +481,15 @@ const init = async () => {
             computePassEncoder.setBindGroup(1, bindGroupSimulatedInvMass);
             constrBG.stretch.forEach((bg) => {
                 computePassEncoder.setBindGroup(2, bg.bg);
-                computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / 64.0));
+                computePassEncoder.dispatchWorkgroups(Math.ceil(bg.numInv / WORKGROUP_SIZE));
             });
         }
 
         computePassEncoder.setPipeline(compute.updateFinalPipeline);
         computePassEncoder.setBindGroup(0, bgVerticesCP);
-        computePassEncoder.setBindGroup(2, bindGroupVelocities);
-        computePassEncoder.setBindGroup(3, compute.bindGroupPerFrame);
-        computePassEncoder.dispatchWorkgroups(Math.ceil((NUM_CELLS_Z + 1) * (NUM_CELLS_X + 1) / 64.0));
+        computePassEncoder.setBindGroup(1, bindGroupVelocities);
+        computePassEncoder.setBindGroup(2, compute.bindGroupPerFrame);
+        computePassEncoder.dispatchWorkgroups(Math.ceil((NUM_CELLS_Z + 1) * (NUM_CELLS_X + 1) / WORKGROUP_SIZE));
 
         computePassEncoder.end();
 

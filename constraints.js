@@ -23,6 +23,31 @@ export function createIntBuffer(dev, arr, label, usage) {
     return buffer;
 };
 
+export function createUintBuffer(dev, arr, label, usage) {
+    let gpuUsage = GPUBufferUsage.COPY_DST;
+    if (usage.s) {
+        gpuUsage |= GPUBufferUsage.STORAGE;
+    }
+    if (usage.u) {
+        gpuUsage |= GPUBufferUsage.UNIFORM;
+    }
+    if (usage.v) {
+        gpuUsage |= GPUBufferUsage.VERTEX;
+    }
+    if (usage.i) {
+        gpuUsage |= GPUBufferUsage.INDEX;
+    }
+    const buffer = dev.createBuffer({
+        label: label,
+        size: arr.byteLength,
+        usage: gpuUsage,
+        mappedAtCreation: true,
+    });
+    new Uint32Array(buffer.getMappedRange()).set(arr);
+    buffer.unmap();
+    return buffer;
+};
+
 export function createFloatBuffer(dev, arr, label, usage) {
     let gpuUsage = GPUBufferUsage.COPY_DST;
     if (usage.s) {
@@ -49,7 +74,7 @@ export function createFloatBuffer(dev, arr, label, usage) {
 };
 
 function stretchArrayToBindGroup(device, arr, bindGroupLayoutRSRSU) {
-    let arrIdx = new Int32Array(arr.length * 2);
+    let arrIdx = new Uint32Array(arr.length * 2);
     let arrL0 = new Float32Array(arr.length);
     let numConstr = new Uint32Array(4);
     numConstr[0] = arr.length;
@@ -61,9 +86,9 @@ function stretchArrayToBindGroup(device, arr, bindGroupLayoutRSRSU) {
         arrIdx[2*i+1] = arr[i].p2;
         arrL0[i] = arr[i].l0;
     }
-    let idxBuffer = createIntBuffer(device, arrIdx, "", {s:true});
+    let idxBuffer = createUintBuffer(device, arrIdx, "", {s:true});
     let l0Buffer = createFloatBuffer(device, arrL0, "", {s:true});
-    let numBuffer = createIntBuffer(device, numConstr, "", {u:true});
+    let numBuffer = createUintBuffer(device, numConstr, "", {u:true});
     let bindGroup = device.createBindGroup({
         layout: bindGroupLayoutRSRSU,
         entries: [
@@ -94,7 +119,7 @@ function stretchArrayToBindGroup(device, arr, bindGroupLayoutRSRSU) {
 }
 
 function bendArrayToBindGroup(device, arr, bindGroupLayoutRSRSU) {
-    let arrIdx = new Int32Array(arr.length * 4);
+    let arrIdx = new Uint32Array(arr.length * 4);
     let arrPhi = new Float32Array(arr.length);
     let numConstr = new Uint32Array(4);
     numConstr[0] = arr.length;
@@ -108,9 +133,9 @@ function bendArrayToBindGroup(device, arr, bindGroupLayoutRSRSU) {
         arrIdx[4*i+3] = arr[i].p4;
         arrPhi[i] = arr[i].phi;
     }
-    let idxBuffer = createIntBuffer(device, arrIdx, "", {s:true});
+    let idxBuffer = createUintBuffer(device, arrIdx, "", {s:true});
     let phiBuffer = createFloatBuffer(device, arrPhi, "", {s:true});
-    let numBuffer = createIntBuffer(device, numConstr, "", {u:true});
+    let numBuffer = createUintBuffer(device, numConstr, "", {u:true});
     let bindGroup = device.createBindGroup({
         layout: bindGroupLayoutRSRSU,
         entries: [

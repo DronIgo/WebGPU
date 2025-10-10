@@ -28,7 +28,7 @@ override wg_x: i32 = 64;
 @compute @workgroup_size(wg_x, 1, 1) 
 fn compute(@builtin(global_invocation_id) id : vec3<u32>)
 {   
-    if (id.x > numConstr) {
+    if (id.x >= numConstr) {
         return;
     }
     var idx1 = stretchIdx[id.x].idx1;
@@ -91,7 +91,7 @@ override wg_x: i32 = 64;
 @compute @workgroup_size(wg_x, 1, 1) 
 fn compute(@builtin(global_invocation_id) id : vec3<u32>)
 {   
-    if (id.x > numConstr) {
+    if (id.x >= numConstr) {
         return;
     }
     var idx1 = bendIdx[id.x].idx1;
@@ -147,19 +147,17 @@ fn projectBend(_p1 : vec3<f32>, _p2 : vec3<f32>, _p3 : vec3<f32>, _p4 : vec3<f32
     var n1 = normalize(c23);
     var n2 = normalize(c24);
     var d = dot(n1, n2);
-
+    d = clamp(d, -1.0, 1.0);
     var q3 = f32(s3) * (cross(p2, n2) + (cross(n1, p2) * d)) / length(c23);
     var q4 = f32(s4) * (cross(p2, n1) + (cross(n2, p2) * d)) / length(c24);
-    var q2 = f32(s2) * (-1.0) * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
+    var q2 = f32(-s2) * ((cross(p3, n2) + (cross(n1, p3) * d)) / length(c23) + 
         (cross(p4, n1) + (cross(n2, p4) * d)) / length(c24));
-    var  q1 = f32(s1) * (vec3<f32>(0.0, 0.0, 0.0) - q2 - q3 - q4);
+    var  q1 = f32(-s1) * (q2 + q3 + q4);
 
     var denom = w1 * dot(q1, q1) + w2 * dot(q2, q2) + 
         w3 * dot(q3, q3) + w4 * dot(q4, q4);
-    
-    denom = select(denom, 0.0, denom < 1e-12);
 
-    var com = sqrt(1 - d * d) * (acos(d) - phi) / denom;
+    var com = select(sqrt(1 - d * d) * (acos(d) - phi) / denom, 0.0, denom < 1e-12);
     var dp1 = q1 * (-w1 * com);
     var dp2 = q2 * (-w2 * com);
     var dp3 = q3 * (-w3 * com);
@@ -208,8 +206,8 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
     var v = vec3<f32>(velocities[3 * id.x], velocities[3 * id.x + 1], velocities[3 * id.x + 2]);
     v.y -= perFrame.gravity * perFrame.deltaTime * s;
     verticesW[3 * id.x] = verticesR[3 * id.x] + v.x * perFrame.deltaTime * s;
-    verticesW[3 * id.x + 1] = verticesR[3 * id.x] + v.y * perFrame.deltaTime * s;
-    verticesW[3 * id.x + 2] = verticesR[3 * id.x] + v.z * perFrame.deltaTime * s;
+    verticesW[3 * id.x + 1] = verticesR[3 * id.x + 1] + v.y * perFrame.deltaTime * s;
+    verticesW[3 * id.x + 2] = verticesR[3 * id.x + 2] + v.z * perFrame.deltaTime * s;
 }
 `;
 
@@ -242,12 +240,12 @@ fn compute(@builtin(global_invocation_id) id : vec3<u32>)
         return;
     }
     velocities[3 * id.x] = (verticesCur[3 * id.x] - verticesPrev[3 * id.x]) / perFrame.deltaTime;
-    velocities[3 * id.x + 1] = (verticesCur[3 * id.x + 1] - verticesPrev[3 * id.x] +1) / perFrame.deltaTime;
+    velocities[3 * id.x + 1] = (verticesCur[3 * id.x + 1] - verticesPrev[3 * id.x + 1]) / perFrame.deltaTime;
     velocities[3 * id.x + 2] = (verticesCur[3 * id.x + 2] - verticesPrev[3 * id.x + 2]) / perFrame.deltaTime;
 }
 `;
 
-export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z) {
+export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X, NUM_CELLS_Z, WORKGROUP_SIZE) {
     let result = {};
 
     // ~~ CREATE COMPUTE SHADER MODULE ~~
@@ -391,11 +389,11 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const bindGroupPerFrame = device.createBindGroup({
         layout: bindGroupLayoutU,
         entries: [
-            { 
-            binding: 0, 
-            resource:  
-                { 
-                buffer: perFrameUniformBuffer
+            {
+                binding: 0,
+                resource:
+                {
+                    buffer: perFrameUniformBuffer
                 }
             },
         ],
@@ -405,7 +403,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     // ~~ CREATE STRETCH PIPELINE ~~
     const stretchPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
-            bindGroupLayoutS, 
+            bindGroupLayoutS,
             bindGroupLayoutRSRS,
             bindGroupLayoutRSRSU
         ]
@@ -414,14 +412,15 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const stretchPipeline = device.createComputePipeline({
         label: "stretch pipeline",
         compute: {
-        module: shaderModuleStretch,
-        constants: {
-            size_x: CLOTH_SIDE_SIZE, 
-            size_z: CLOTH_SIDE_SIZE,
-            numCells_x: NUM_CELLS_X + 1,
-            numCells_z: NUM_CELLS_Z + 1,
-        },
-        entryPoint: "compute",
+            module: shaderModuleStretch,
+            constants: {
+                size_x: CLOTH_SIDE_SIZE,
+                size_z: CLOTH_SIDE_SIZE,
+                numCells_x: NUM_CELLS_X + 1,
+                numCells_z: NUM_CELLS_Z + 1,
+                wg_x: WORKGROUP_SIZE,
+            },
+            entryPoint: "compute",
         },
         layout: stretchPipelineLayout
     });
@@ -431,7 +430,7 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     // ~~ CREATE BEND PIPELINE ~~
     const bendPipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [
-            bindGroupLayoutS, 
+            bindGroupLayoutS,
             bindGroupLayoutRSRS,
             bindGroupLayoutRSRSU
         ]
@@ -440,14 +439,15 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const bendPipeline = device.createComputePipeline({
         label: "bind pipeline",
         compute: {
-        module: shaderModuleBend,
-        constants: {
-            size_x: CLOTH_SIDE_SIZE, 
-            size_z: CLOTH_SIDE_SIZE,
-            numCells_x: NUM_CELLS_X + 1,
-            numCells_z: NUM_CELLS_Z + 1,
-        },
-        entryPoint: "compute",
+            module: shaderModuleBend,
+            constants: {
+                size_x: CLOTH_SIDE_SIZE,
+                size_z: CLOTH_SIDE_SIZE,
+                numCells_x: NUM_CELLS_X + 1,
+                numCells_z: NUM_CELLS_Z + 1,
+                wg_x: WORKGROUP_SIZE,
+            },
+            entryPoint: "compute",
         },
         layout: bendPipelineLayout
     });
@@ -467,14 +467,15 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const updateInitPipeline = device.createComputePipeline({
         label: "update init pipeline",
         compute: {
-        module: shaderModuleUpdateInit,
-        constants: {
-            size_x: CLOTH_SIDE_SIZE, 
-            size_z: CLOTH_SIDE_SIZE,
-            numCells_x: NUM_CELLS_X + 1,
-            numCells_z: NUM_CELLS_Z + 1,
-        },
-        entryPoint: "compute",
+            module: shaderModuleUpdateInit,
+            constants: {
+                size_x: CLOTH_SIDE_SIZE,
+                size_z: CLOTH_SIDE_SIZE,
+                numCells_x: NUM_CELLS_X + 1,
+                numCells_z: NUM_CELLS_Z + 1,
+                wg_x: WORKGROUP_SIZE,
+            },
+            entryPoint: "compute",
         },
         layout: updateInitPipelineLayout
     });
@@ -493,14 +494,15 @@ export function prepareComputeShaderModule(device, CLOTH_SIDE_SIZE, NUM_CELLS_X,
     const updateFinalPipeline = device.createComputePipeline({
         label: "update final pipeline",
         compute: {
-        module: shaderModuleUpdateFinal,
-        constants: {
-            size_x: CLOTH_SIDE_SIZE, 
-            size_z: CLOTH_SIDE_SIZE,
-            numCells_x: NUM_CELLS_X + 1,
-            numCells_z: NUM_CELLS_Z + 1,
-        },
-        entryPoint: "compute",
+            module: shaderModuleUpdateFinal,
+            constants: {
+                size_x: CLOTH_SIDE_SIZE,
+                size_z: CLOTH_SIDE_SIZE,
+                numCells_x: NUM_CELLS_X + 1,
+                numCells_z: NUM_CELLS_Z + 1,
+                wg_x: WORKGROUP_SIZE,
+            },
+            entryPoint: "compute",
         },
         layout: updateFinalPipelineLayout
     });
@@ -531,7 +533,7 @@ export function projectStretchConstraint(p1, p2, d, w1, w2, s1, s2) {
 }
 
 //https://matthias-research.github.io/pages/publications/posBasedDyn.pdf
-export function projectBendConstraint(_p1, _p2, _p3, _p4, phi, w1, w2, w3, w4, s1, s2, s3 ,s4) {
+export function projectBendConstraint(_p1, _p2, _p3, _p4, phi, w1, w2, w3, w4, s1, s2, s3, s4) {
     let p2 = vecSub(_p2, _p1);
     let p3 = vecSub(_p3, _p1);
     let p4 = vecSub(_p4, _p1);
@@ -543,13 +545,13 @@ export function projectBendConstraint(_p1, _p2, _p3, _p4, phi, w1, w2, w3, w4, s
 
     let q3 = vecMulS(vecDiv(vecAdd(cross(p2, n2), vecMulS(cross(n1, p2), d)), vecLength(c23)), s3);
     let q4 = vecMulS(vecDiv(vecAdd(cross(p2, n1), vecMulS(cross(n2, p2), d)), vecLength(c24)), s4);
-    let q2 = vecMulS(vecSub([0,0,0], vecAdd(vecDiv(vecAdd(cross(p3, n2), vecMulS(cross(n1, p3), d)), vecLength(c23)),
+    let q2 = vecMulS(vecSub([0, 0, 0], vecAdd(vecDiv(vecAdd(cross(p3, n2), vecMulS(cross(n1, p3), d)), vecLength(c23)),
         vecDiv(vecAdd(cross(p4, n1), vecMulS(cross(n2, p4), d)), vecLength(c24)))), s2);
-    let q1 = vecMulS(vecSub(vecSub(vecSub([0,0,0], q2), q3), q4), s1);
+    let q1 = vecMulS(vecSub(vecSub(vecSub([0, 0, 0], q2), q3), q4), s1);
 
-    let denom = w1 * vecMul(q1, q1) + w2 * vecMul(q2, q2) + 
+    let denom = w1 * vecMul(q1, q1) + w2 * vecMul(q2, q2) +
         w3 * vecMul(q3, q3) + w4 * vecMul(q4, q4);
-    
+
     if (denom < 1e-12) {
         return [_p1, _p2, _p3, _p4];
     }
@@ -559,11 +561,11 @@ export function projectBendConstraint(_p1, _p2, _p3, _p4, phi, w1, w2, w3, w4, s
     let dp2 = vecMulS(q2, -w2 * common);
     let dp3 = vecMulS(q3, -w3 * common);
     let dp4 = vecMulS(q4, -w4 * common);
-    return [vecAdd(_p1,dp1), vecAdd(_p2, dp2), vecAdd(_p3, dp3), vecAdd(_p4, dp4)];
+    return [vecAdd(_p1, dp1), vecAdd(_p2, dp2), vecAdd(_p3, dp3), vecAdd(_p4, dp4)];
 }
 
 function cross(a, b) {
-    return [ (a[1] * b[2] - a[2] * b[1]), (a[2] * b[0] - a[0] * b[2]), (a[0] * b[1] - a[1] * b[0]) ];
+    return [(a[1] * b[2] - a[2] * b[1]), (a[2] * b[0] - a[0] * b[2]), (a[0] * b[1] - a[1] * b[0])];
 }
 
 function vecMul(a, b) {
